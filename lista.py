@@ -47,7 +47,7 @@ class Lista:
             self.Z = activation(self.B + tf.matmul(self.S, self.Z), self.theta)
             self.layers.append(('Lista T='+str(i+1), self.Z, (self.We, self.theta)))
         
-        self.loss = tf.nn.l2_loss(self.Z - tf.matmul(self.We, tf.transpose(self.x)))# + tf.norm(self.Z, ord=1)
+        self.loss = tf.reduce_mean(tf.nn.l2_loss(self.Z - tf.matmul(self.We, tf.transpose(self.x))) + tf.norm(self.Z, ord=1))
         print('loss: ', self.loss.shape)
         tf.summary.scalar('loss: ', self.loss)
         
@@ -56,6 +56,7 @@ class Lista:
         self.merged_summary = tf.summary.merge_all()
 
         print(self.layers)
+
     def learn(self, x_train, max_iter=100):
         with tf.Session() as sess:
             sess.run(tf.global_variables_initializer())
