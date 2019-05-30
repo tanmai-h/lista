@@ -11,7 +11,11 @@ def get_data(n_samples=100, n_features=30, n_components=50, n_nonzero_coefs=7, r
     Y,A,X = make_sparse_coded_signal(n_samples=n_samples,n_features=n_features,n_components=n_components
                                     ,n_nonzero_coefs=n_nonzero_coefs, random_state=random_state)
     #AX = Y
-    return Y,A,X                                
+    if len(X.shape) == 1:
+        Y = np.reshape(Y, (Y.shape[0],1))
+        X = np.reshape(X, (X.shape[0],1))
+
+    return Y.T,A,X.T                                
 
 class Lista:
     def __init__(self, n_features, n_components, initial_lambda=1e-1, T=6, learning_rate=1e-3, activation=soft_threshold, model_name="lista", model_path="./models", tb_path="./tb/"):
@@ -28,7 +32,6 @@ class Lista:
         self.zmin = tf.placeholder(dtype=tf.float32, shape=(None, n_components), name='optimal_output')
         # self.samples = tf.placeholder(dtype=tf.int32, name='num_samples')
 
-        rand_mat = np.random.uniform(size=(n_components, n_features))
         self.We = tf.Variable(tf.random_uniform(shape=(n_components, n_features)), dtype=tf.float32, name='We')                                                            
         
         e,_ = tf.linalg.eigh(tf.matmul(self.We, tf.transpose(self.We)), name='eigen_op') #tf.svd(tf.matmul(self.We, tf.transpose(self.We)), name='svd_op')
@@ -61,7 +64,8 @@ class Lista:
         self.writer = tf.summary.FileWriter(tb_path + model_name)
         
 
-        self.loss = tf.reduce_mean(tf.nn.l2_loss(self.Z - tf.transpose(self.zmin)))
+        self.loss = tf.losses.mean_squared_error(labels=tf.transpose(self.zmin),predictions=self.Z)
+        # self.loss = tf.reduce_mean(tf.nn.l2_loss(self.Z - tf.transpose(self.zmin)))
         tf.summary.scalar('l2_loss: ', self.loss)
     
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(self.loss)
@@ -77,35 +81,35 @@ class Lista:
             sess.run(tf.global_variables_initializer())
 
             for i in range(max_iter):
-                loss, _, theta, lips,summary, cond = sess.run([self.loss, self.optimizer, self.theta, 
-                                                        self.Lipschitz, self.merged_summary, self.cond], 
+                loss, _, theta, lips,summary, cond, z = sess.run([self.loss, self.optimizer, self.theta, 
+                                                        self.Lipschitz, self.merged_summary, self.cond, self.Z], 
                                                         feed_dict = {self.x: x_train, self.zmin: y_train}
                                                          )
                 # summary = sess.run([self.merged_summary], feed_dict={self.x: x_train})
+                
                 self.writer.add_summary(summary, i)
-                print("Epoch", i, "/",max_iter, " Loss = ", loss, "lipschitz: ", lips, " theta: ", theta)
+                print("Epoch", i, "/",max_iter, " Loss = ", loss, "norm err: ", np.linalg.norm(z.T-y_train)) #loss, "lipschitz: ", lips, " theta: ", theta)
             print('conition number: ', cond)
     
     def predict(self, x_train, z0):
         with tf.Session() as sess:
             sess.run(tf.global_variables_initializer())
-            z = sess.run([self.Z], feed_dict={self.x: x_train})
-            z=z[0]
-            print(z)
-            print(z0)
-            print(np.linalg.norm(z-z0, ord=2))
+            z = sess.run([self.Z], feed_dict={self.x: x_train,self.zmin: z0})
+            z = z[0]
 
+            print(z.shape)
+            print(z0.shape)
+            print(np.linalg.norm(z.T-z0))
+            print(z.T[0])
+            print(z0[0])
 def main():
-    X,A,Z = get_data(n_samples=1, n_features=30, n_components=50, n_nonzero_coefs=1)
-    if len(X.shape) == 1:
-        Z = Z[:, None]
-        X = X[:, None]
+    X,A,Z = get_data(n_samples=1, n_features=30, n_components=50)
+    
     N,M = A.shape
     
     model = Lista(n_features=N, n_components=M,T=6)
-    model.learn(x_train=X.T, y_train= Z.T, max_iter=7)
-    
-    # x,a,z = X[:, 1], None, Z[:, 1]
-    # model.predict(x_train=np.reshape(x.T, (1, x.shape[0])), z0=z)
+    model.learn(x_train=X, y_train= Z, max_iter=100)
+
+    model.predict(x_train=X, z0=Z)
 if __name__ == '__main__':
     main()
