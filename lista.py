@@ -26,16 +26,19 @@ class Lista:
 
         self.x = tf.placeholder(dtype=tf.float32, shape=(None, n_features), name='input')
         self.zmin = tf.placeholder(dtype=tf.float32, shape=(None, n_components), name='optimal_output')
-        
+        # self.samples = tf.placeholder(dtype=tf.int32, name='num_samples')
+
         rand_mat = np.random.uniform(size=(n_components, n_features))
-        self.We = tf.Variable(rand_mat, dtype=tf.float32, name='We')                                                            
+        self.We = tf.Variable(tf.random_uniform(shape=(n_components, n_features)), dtype=tf.float32, name='We')                                                            
         
         e,_ = tf.linalg.eigh(tf.matmul(self.We, tf.transpose(self.We)), name='eigen_op') #tf.svd(tf.matmul(self.We, tf.transpose(self.We)), name='svd_op')
+        self.cond = tf.reduce_max(e) / tf.reduce_min(e)
         self.Lipschitz = tf.reduce_max(e)
 
         self.B = tf.matmul(self.We, tf.transpose(self.x), name='B')        
-        self.S = tf.eye(self.M) - 1/self.Lipschitz * (tf.matmul(self.We, tf.transpose(self.We), name="inside_S"))
-        self.theta = self._lambda / 2 / self.Lipschitz
+        # self.S = tf.eye(self.M) - 1/self.Lipschitz * (tf.matmul(self.We, tf.transpose(self.We), name="inside_S"))
+        self.S = tf.Variable(tf.eye(self.M) - 1/self.Lipschitz * (tf.matmul(self.We, tf.transpose(self.We), name="inside_S")), dtype=tf.float32, name='S')
+        self.theta = tf.Variable(self._lambda / 2 / self.Lipschitz, dtype=tf.float32, name='theta')
         self.Z_list = []
 
         print('We:',  self.We.shape)
@@ -44,7 +47,7 @@ class Lista:
         print('B: ',  self.B.shape)
         print('S: ',  self.S.shape)
 
-        old_Z = tf.zeros((n_components, None), tf.float32)
+        old_Z = tf.zeros((n_components,1), tf.float32)
 
         for i in range(T):
             Z = activation(self.B + tf.matmul(self.S, old_Z), self.theta, i)
@@ -52,9 +55,7 @@ class Lista:
             old_Z = Z
         
         self.Z = Z
-
-        print('Z_list: ',  len(self.Z_list))
-
+    
         # TensorBoard Setup
         self.merged_summary = tf.summary.merge_all()
         self.writer = tf.summary.FileWriter(tb_path + model_name)
@@ -62,9 +63,10 @@ class Lista:
 
         self.loss = tf.reduce_mean(tf.nn.l2_loss(self.Z - tf.transpose(self.zmin)))
         tf.summary.scalar('l2_loss: ', self.loss)
-        
+    
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate).minimize(self.loss)
-        
+        self.We = tf.nn.l2_normalize(self.We, axis=0)
+
         self.merged_summary = tf.summary.merge_all()
         with tf.Session() as sess:
             self.writer.add_graph(sess.graph)
@@ -75,10 +77,14 @@ class Lista:
             sess.run(tf.global_variables_initializer())
 
             for i in range(max_iter):
-                loss, _, theta, lips,summary = sess.run([self.loss, self.optimizer, self.theta, self.Lipschitz, self.merged_summary], feed_dict = {self.x: x_train, self.zmin: y_train})
+                loss, _, theta, lips,summary, cond = sess.run([self.loss, self.optimizer, self.theta, 
+                                                        self.Lipschitz, self.merged_summary, self.cond], 
+                                                        feed_dict = {self.x: x_train, self.zmin: y_train}
+                                                         )
                 # summary = sess.run([self.merged_summary], feed_dict={self.x: x_train})
                 self.writer.add_summary(summary, i)
                 print("Epoch", i, "/",max_iter, " Loss = ", loss, "lipschitz: ", lips, " theta: ", theta)
+            print('conition number: ', cond)
     
     def predict(self, x_train, z0):
         with tf.Session() as sess:
@@ -88,16 +94,18 @@ class Lista:
             print(z)
             print(z0)
             print(np.linalg.norm(z-z0, ord=2))
-    
+
 def main():
-    X,A,Z = get_data(n_samples=100, n_features=30, n_components=50)
-    # X = AZ
+    X,A,Z = get_data(n_samples=1, n_features=30, n_components=50, n_nonzero_coefs=1)
+    if len(X.shape) == 1:
+        Z = Z[:, None]
+        X = X[:, None]
     N,M = A.shape
     
     model = Lista(n_features=N, n_components=M,T=6)
-    model.learn(x_train=X.T, y_train= Z.T, max_iter=2000)
+    model.learn(x_train=X.T, y_train= Z.T, max_iter=7)
     
-    x,a,z = X[:, 1], None, Z[:, 1]
-    model.predict(x_train=np.reshape(x.T, (1, x.shape[0])), z0=z)
+    # x,a,z = X[:, 1], None, Z[:, 1]
+    # model.predict(x_train=np.reshape(x.T, (1, x.shape[0])), z0=z)
 if __name__ == '__main__':
     main()
